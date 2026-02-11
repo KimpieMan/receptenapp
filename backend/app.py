@@ -3,18 +3,32 @@ from flask_cors import CORS
 import psycopg2
 import os
 from datetime import datetime
+from urllib.parse import quote_plus
 
 app = Flask(__name__)
 CORS(app)
 
-# Database connectie helper
+# Verbeterde database connectie
 def get_db_connection():
     try:
+        # Haal environment variables op
+        host = os.environ.get('DB_HOST')
+        database = os.environ.get('DB_NAME', 'postgres')
+        user = os.environ.get('DB_USER', 'postgres')
+        password = os.environ.get('DB_PASSWORD')
+        
+        if not all([host, database, user, password]):
+            print("Missing database environment variables")
+            return None
+            
+        # Maak connectie string met SSL
         conn = psycopg2.connect(
-            host=os.environ.get('DB_HOST', 'localhost'),
-            database=os.environ.get('DB_NAME', 'receptenapp'),
-            user=os.environ.get('DB_USER', 'postgres'),
-            password=os.environ.get('DB_PASSWORD', 'postgres')
+            host=host,
+            database=database,
+            user=user,
+            password=password,
+            port=5432,
+            sslmode='require'
         )
         return conn
     except Exception as e:
@@ -26,6 +40,7 @@ def init_db():
     try:
         conn = get_db_connection()
         if not conn:
+            print("Could not connect to database for initialization")
             return
             
         cur = conn.cursor()
@@ -63,10 +78,29 @@ def init_db():
     except Exception as e:
         print(f"Database initialization error: {e}")
 
+# === API ENDPOINTS ===
+
 # Health check endpoint
 @app.route('/api/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "ok", "message": "ReceptenApp API is running!", "timestamp": datetime.now().isoformat()})
+
+# Database test endpoint (voor debugging)
+@app.route('/api/db-test', methods=['GET'])
+def db_test():
+    try:
+        conn = get_db_connection()
+        if conn:
+            cur = conn.cursor()
+            cur.execute('SELECT version()')
+            version = cur.fetchone()
+            cur.close()
+            conn.close()
+            return jsonify({"status": "Connected", "version": version[0]})
+        else:
+            return jsonify({"status": "Failed", "error": "Could not create connection"}), 500
+    except Exception as e:
+        return jsonify({"status": "Error", "error": str(e)}), 500
 
 # Get all recipes
 @app.route('/api/recipes', methods=['GET'])
@@ -231,5 +265,5 @@ def toggle_timer(timer_id):
 
 if __name__ == '__main__':
     init_db()
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=True)
